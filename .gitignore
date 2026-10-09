@@ -6,8 +6,7 @@ __pycache__/
 # C and C++ extensions
 *.so
 
-# Large datasets and archives (do not commit GBs of raw images)
-data/
+# Large archives (files > 100MB blocked by GitHub)
 *.zip
 *.tar
 *.tar.gz

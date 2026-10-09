@@ -179,9 +179,9 @@ print("VERIFICATION ON CHALLENGE IMAGES:")
 print("=" * 60)
 
 test_suite = [
-    r"C:\Users\DELL\Desktop\Fakers.jpg",
-    r"C:\Users\DELL\Desktop\fake_20.png",
-    r"C:\Users\DELL\Desktop\real_20.png",
+    r"test_images\Fakers.jpg",
+    r"test_images\fake_20.png",
+    r"test_images\real_20.png",
     r"test_images\face_real.jpg",
     r"test_images\face_fake.jpg",
 ]

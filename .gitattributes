@@ -1,0 +1,6 @@
+# Keep model weights and images byte-exact on every platform (checksums in models/SHA256SUMS and samples/manifest.json).
+*.pt     binary
+*.keras  binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary

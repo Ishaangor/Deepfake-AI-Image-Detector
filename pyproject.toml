@@ -1,0 +1,12 @@
+[project]
+name = "ai-image-detector"
+version = "1.0.0"
+description = "Research prototype: calibrated real-vs-AI-generated image detection with Grad-CAM explanations"
+readme = "README.md"
+requires-python = ">=3.11"   # tested on 3.13
+# Runtime dependencies are pinned in requirements.txt (tested versions); torch/torchvision are installed by
+# scripts/setup.ps1 from the CUDA or CPU wheel index.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -57,3 +57,15 @@ graphify-out/
 # development stand-in checkpoints (superseded; not shipped)
 models/general_native_a.*
 models/general_glob_a.pt
+models/_archive/
+
+# local run logs (training/eval stdout) - kept on disk, not versioned
+logs/
+
+# Streamlit secrets and local pytest cache
+.streamlit/secrets.toml
+.pytest_cache/
+*.card.json.hidden
+
+# throw-away venv used by scripts/generate_sbom.ps1
+.sbom-tools/

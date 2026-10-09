@@ -1,0 +1,12 @@
+# Streamlit settings for the AI Image Detector UI (app.py).
+[server]
+maxUploadSize = 25          # MB; matches the limit stated in the upload box
+headless = true
+address = "localhost"       # listen on this machine only; nothing is exposed to the network
+
+[browser]
+gatherUsageStats = false    # no telemetry
+
+[theme]
+base = "light"              # high-contrast light theme reads best when screen-sharing
+primaryColor = "#4f46e5"

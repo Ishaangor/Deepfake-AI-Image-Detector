@@ -1,0 +1,211 @@
+{
+ "model": "general_native_b",
+ "bench": "v2",
+ "temperature": 1.617777011090492,
+ "band": [
+  0.2703803479671478,
+  0.810177206993103
+ ],
+ "benchmark": {
+  "name": "CompEval-v2 (held-out)",
+  "n_fake": 2315,
+  "n_real": 1469,
+  "auc": 0.9086668029117235,
+  "auc_ci": [
+   0.8998815844221911,
+   0.9176481407695689
+  ],
+  "fake_recall": 0.7248380129589633,
+  "real_specificity": 0.8883594281824371,
+  "ece": 0.022040310520700657,
+  "brier": 0.14122967515757895,
+  "balanced_acc": 0.8065987205707001,
+  "fake_precision": 0.9109663409337676,
+  "fake_f1": 0.8073129660813086,
+  "confusion": {
+   "tp_fake": 1678,
+   "fn_fake": 637,
+   "fp_fake": 164,
+   "tn_real": 1305
+  },
+  "ece_classwise": 0.13567973110653947,
+  "mean_p_fake": 0.48187410656638496,
+  "share_fake": 0.6117864693446089
+ },
+ "benchmark_note": "Whole generator families (and disjoint real-image shards) were withheld from training, calibration and model selection.",
+ "per_family": {
+  "FLUX": {
+   "n": 641,
+   "recall": 0.7628705148205929
+  },
+  "Imagen": {
+   "n": 252,
+   "recall": 0.503968253968254
+  },
+  "Midjourney": {
+   "n": 856,
+   "recall": 0.602803738317757
+  },
+  "kandinsky_2_2": {
+   "n": 255,
+   "recall": 0.9490196078431372
+  },
+  "stable_cascade": {
+   "n": 311,
+   "recall": 0.977491961414791
+  }
+ },
+ "per_real_source": {
+  "LAION": {
+   "n": 867,
+   "specificity": 0.881199538638985
+  },
+  "RAISE": {
+   "n": 126,
+   "specificity": 0.9682539682539683
+  },
+  "coco": {
+   "n": 126,
+   "specificity": 0.9126984126984127
+  },
+  "ffhq": {
+   "n": 126,
+   "specificity": 1.0
+  },
+  "imagenet": {
+   "n": 224,
+   "specificity": 0.7946428571428571
+  }
+ },
+ "robustness": {
+  "blur1": {
+   "auc": 0.8814963529942792,
+   "balanced_acc": 0.7931458934612665
+  },
+  "clean": {
+   "auc": 0.9086668029117235,
+   "balanced_acc": 0.8065987205707001
+  },
+  "gray": {
+   "auc": 0.9259933514372628,
+   "balanced_acc": 0.8315361238085296
+  },
+  "half": {
+   "auc": 0.8416123279232285,
+   "balanced_acc": 0.7701398374174995
+  },
+  "jpeg50": {
+   "auc": 0.9535816522016564,
+   "balanced_acc": 0.8824887855125436
+  },
+  "jpeg75": {
+   "auc": 0.9383572962903607,
+   "balanced_acc": 0.8688142416271776
+  },
+  "quarter": {
+   "auc": 0.7626002908194847,
+   "balanced_acc": 0.7107451771455289
+  },
+  "social": {
+   "auc": 0.9405425591820591,
+   "balanced_acc": 0.8673939604232614
+  }
+ },
+ "reliability_bins": [
+  {
+   "lo": 0,
+   "hi": 0.1,
+   "n": 630,
+   "fake_rate": 0.026984126984126985
+  },
+  {
+   "lo": 0.1,
+   "hi": 0.2,
+   "n": 367,
+   "fake_rate": 0.23978201634877383
+  },
+  {
+   "lo": 0.2,
+   "hi": 0.3,
+   "n": 353,
+   "fake_rate": 0.41359773371104813
+  },
+  {
+   "lo": 0.3,
+   "hi": 0.4,
+   "n": 264,
+   "fake_rate": 0.5871212121212122
+  },
+  {
+   "lo": 0.4,
+   "hi": 0.5,
+   "n": 328,
+   "fake_rate": 0.7042682926829268
+  },
+  {
+   "lo": 0.5,
+   "hi": 0.6,
+   "n": 315,
+   "fake_rate": 0.7873015873015873
+  },
+  {
+   "lo": 0.6,
+   "hi": 0.7,
+   "n": 317,
+   "fake_rate": 0.8580441640378549
+  },
+  {
+   "lo": 0.7,
+   "hi": 0.8,
+   "n": 326,
+   "fake_rate": 0.911042944785276
+  },
+  {
+   "lo": 0.8,
+   "hi": 0.9,
+   "n": 480,
+   "fake_rate": 0.9666666666666667
+  },
+  {
+   "lo": 0.9,
+   "hi": 1.0,
+   "n": 404,
+   "fake_rate": 0.9826732673267327
+  }
+ ],
+ "verdicts": {
+  "band_p_real": [
+   0.2703803479671478,
+   0.810177206993103
+  ],
+  "inconclusive_share": 0.45428118393234673,
+  "decided_accuracy": 0.9326876513317192,
+  "ai_call_precision": 0.9610154125113327,
+  "real_call_precision": 0.9002079002079002,
+  "ai_images": {
+   "ai": 0.45788336933045354,
+   "inconclusive": 0.5006479481641468,
+   "real": 0.04146868250539957
+  },
+  "real_images": {
+   "ai": 0.029271613342409804,
+   "inconclusive": 0.381211708645337,
+   "real": 0.5895166780122533
+  }
+ },
+ "explain": {
+  "layer": "blocks.4",
+  "n": 80,
+  "beats_random_frac": 0.7625
+ },
+ "limitations": [
+  "Real photos wrongly flagged more than 20% of the time for source: imagenet.",
+  "On the held-out benchmark the score understates AI images: mean predicted P(AI) 0.48 vs. an actual AI share of 0.61. Mid-range scores (20-60%) were AI-generated more often than the number suggests - see the calibration chart.",
+  "The score is a statistical estimate from pixel statistics, not proof of how an image was made.",
+  "Only generator families and real-image sources listed above were measured; anything else is untested.",
+  "Benchmark images are samples; per-family rates rest on small counts and carry wide uncertainty.",
+  "Heavy compression, very low resolution (< 256 px) and screenshots/re-uploads shift the score; see the robustness table.",
+  "Attention maps show where the model looked, not where an image was manipulated.",
+  "Training data (Community Forensics) is CC BY-NC-SA 4.0: research/non-commercial use only."
+ ]
+}

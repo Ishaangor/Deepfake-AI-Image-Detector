@@ -9,10 +9,15 @@ import json
 import os
 import sys
 
-import detector
+ROOT = os.path.dirname(os.path.abspath(__file__))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+import detector  # noqa: E402
+from detector.paths import MODELS  # noqa: E402
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-LEGACY_MODEL_PATH = os.path.join("models", "best_xception.keras")
+LEGACY_MODEL_PATH = os.path.join(MODELS, "best_xception.keras")
 
 
 def legacy_predict(path):
@@ -57,7 +62,7 @@ def main(argv=None):
         out = legacy_predict(args.image)
         out["region_size"] = list(out["region_size"])
     else:
-        print("ERROR: no model found (models/best_finetuned.pt or models/best_xception.keras)", file=sys.stderr)
+        print(f"ERROR: no model found in {MODELS}. Run scripts\\setup.ps1 or see models/README.md.", file=sys.stderr)
         return 1
 
     out["prediction"] = "REAL" if out["real_prob"] >= 0.5 else "FAKE"

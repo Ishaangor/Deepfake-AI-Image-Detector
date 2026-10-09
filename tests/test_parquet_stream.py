@@ -6,7 +6,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-import parquet_stream as ps
+from training import parquet_stream as ps
 
 
 @pytest.mark.parametrize("dictionary", [True, False])

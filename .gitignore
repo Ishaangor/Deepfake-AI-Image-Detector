@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C and C++ extensions
+*.so
+
+# Large datasets and archives (do not commit GBs of raw images)
+data/
+*.zip
+*.tar
+*.tar.gz
+
+# Redundant duplicate model checkpoints (keep best_xception.keras)
+models/best_universal_detector.keras
+models/best_xception_old_rvf10k.keras
+models/xception_deepfake_final.keras
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE and OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Temporary files and logs
+*.log
+.cache/

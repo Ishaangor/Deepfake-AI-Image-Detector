@@ -1,0 +1,19 @@
+{
+ "temperature": 0.9895718693733215,
+ "temperature_calib_mix": 2.095962056282171,
+ "temperature_calib_clean_only": 1.028203791280382,
+ "temperature_source": "shipped value kept (fit on the OLD validation set, not a separate split)",
+ "crop_policy": "face",
+ "crop_selection": {
+  "split": "val_sel",
+  "n": 903,
+  "acc_none": 0.9767441860465116,
+  "acc_face": 0.9889258028792912,
+  "face_found_frac": 0.9147286821705426,
+  "rule": "face only if acc_face > acc_none + 0.005"
+ },
+ "arch": "efficientnet_b0",
+ "img": 256,
+ "checkpoint": "best_finetuned.pt",
+ "checkpoint_info": {}
+}

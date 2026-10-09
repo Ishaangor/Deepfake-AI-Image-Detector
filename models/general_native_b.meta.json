@@ -1,0 +1,26 @@
+{
+ "name": "general_native_b",
+ "view": "native",
+ "arch": "efficientnet_b0",
+ "temperature": 1.617777011090492,
+ "temperature_clean_only": 1.3710204504855494,
+ "calib_n": 4827,
+ "calib_generators": 33,
+ "nll_before": 0.46269791020328493,
+ "nll_after": 0.4276856111625741,
+ "conditions": [
+  "clean",
+  "jpeg50",
+  "down128",
+  "blur1.0",
+  "gray"
+ ],
+ "val_composite": 0.85008825,
+ "epoch": 4,
+ "band": [
+  0.2703803479671478,
+  0.810177206993103
+ ],
+ "band_target_precision": 0.9,
+ "explain_layer": "blocks.4"
+}

@@ -1,406 +1,331 @@
-import os
+"""AI Image Detector - Streamlit UI.
+
+    streamlit run app.py
+
+Everything numeric on the page comes from detector.analyze()/detector.explain() (shared with predict.py) or from the
+measured model card artifacts/model_card_<model>.json written by make_model_card.py. Nothing about accuracy is hard-coded.
+Rollback to the previous UI/engine: DETECTOR_BACKEND=legacy (needs TensorFlow) - see legacy/app_legacy.py.
+"""
+import glob
+import hashlib
 import io
-import cv2
+import json
+import os
+import time
+
 import numpy as np
-from PIL import Image, ImageChops, ImageEnhance
 import streamlit as st
-import tensorflow as tf
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance
 
-# Reduce TensorFlow messages
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+if os.environ.get("DETECTOR_BACKEND", "").lower() == "legacy":
+    import runpy
+    runpy.run_path(os.path.join("legacy", "app_legacy.py"))
+    st.stop()
 
-# ==========================================
-# PAGE CONFIGURATION & STYLING
-# ==========================================
+import detector  # noqa: E402
 
-st.set_page_config(
-    page_title="Universal Deepfake & AI Image Detector",
-    page_icon="🛡️",
-    layout="wide"
-)
+st.set_page_config(page_title="AI Image Detector", page_icon="🔍", layout="wide")
 
-# Custom modern CSS styling
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin-bottom: 0.2rem;
-        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    .sub-header {
-        font-size: 1.05rem;
-        color: #9CA3AF;
-        margin-bottom: 1.5rem;
-    }
-    .metric-card {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-    }
-    .badge-info {
-        display: inline-block;
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 0.82rem;
-        font-weight: 600;
-        background: rgba(59, 130, 246, 0.15);
-        color: #60A5FA;
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        margin-right: 6px;
-        margin-bottom: 8px;
-    }
+  .block-container {padding-top: 2rem; max-width: 1180px;}
+  .hero-title {font-size: 2rem; font-weight: 750; letter-spacing: -0.02em; margin: 0;}
+  .hero-sub {opacity: .72; margin: .25rem 0 1.2rem 0; font-size: 1rem;}
+  .card {border: 1px solid rgba(128,128,128,.28); border-radius: 14px; padding: 1.1rem 1.25rem; background: rgba(128,128,128,.06);}
+  .chip {display: inline-block; padding: .35rem .9rem; border-radius: 999px; font-weight: 700; font-size: 1.15rem; border: 1.5px solid;}
+  .chip.fake {color: #dc2626; background: rgba(220,38,38,.12);}
+  .chip.real {color: #16a34a; background: rgba(22,163,74,.12);}
+  .chip.unsure {color: #d97706; background: rgba(217,119,6,.14);}
+  .score {font-size: 2.6rem; font-weight: 750; line-height: 1.1; margin: .5rem 0 0 0;}
+  .score small {font-size: .95rem; font-weight: 500; opacity: .7;}
+  .gauge {position: relative; height: 14px; border-radius: 7px; margin: .9rem 0 .3rem 0;
+          background: linear-gradient(90deg, #16a34a 0%, #84cc16 30%, #f59e0b 50%, #f97316 70%, #dc2626 100%);}
+  .gauge .band {position: absolute; top: -3px; bottom: -3px; border: 2px dashed rgba(128,128,128,.9); border-radius: 4px;}
+  .gauge .mark {position: absolute; top: -6px; width: 4px; height: 26px; border-radius: 2px; background: currentColor;
+                box-shadow: 0 0 0 2px rgba(255,255,255,.7);}
+  .gauge-lab {display: flex; justify-content: space-between; font-size: .78rem; opacity: .7;}
+  .tag {font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; opacity: .6; margin-bottom: .2rem;}
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# CONSTANTS & CACHED MODEL LOADERS
-# ==========================================
+MODELS_DIR = "models"
+SAMPLE_DIR = "test_images"
 
-MODEL_PATH = r"models\best_xception.keras"
-IMG_SIZE = (299, 299)
 
-@st.cache_resource
-def load_universal_xception():
-    """Loads the retrained universal Xception detector."""
-    if not os.path.exists(MODEL_PATH):
-        st.error(f"Model file not found at {MODEL_PATH}")
-        return None
-    return tf.keras.models.load_model(MODEL_PATH)
+# ----------------------------------------------------------------------------- helpers
+def list_models():
+    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(MODELS_DIR, "*.pt")))
+    names.sort(key=lambda n: (not n.startswith("general_"), n))
+    return names
 
-@st.cache_resource
-def load_swin_transformer():
-    """Loads the Swin Transformer AI detector from Hugging Face."""
+
+def model_card(model_file):
+    path = os.path.join("artifacts", f"model_card_{os.path.splitext(model_file)[0]}.json")
     try:
-        from transformers import pipeline
-        return pipeline("image-classification", model="umm-maybe/AI-image-detector", device="cpu")
-    except Exception as e:
-        st.warning(f"Swin Transformer engine unavailable: {e}")
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
         return None
 
-# ==========================================
-# FORENSICS & PREPROCESSING UTILITIES
-# ==========================================
 
-def detect_and_crop_face(pil_image):
-    """
-    Detects faces using OpenCV Haar Cascade.
-    Returns: (cropped_face_pil, face_box_coords, annotated_pil_image)
-    """
-    img_cv = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-    
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-    
-    if len(faces) == 0:
-        return pil_image, None, pil_image
-    
-    # Pick the largest detected face
-    faces_sorted = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-    x, y, w, h = faces_sorted[0]
-    
-    # Add 15% margin padding
-    pad_w = int(w * 0.15)
-    pad_h = int(h * 0.15)
-    
-    img_h, img_w = img_cv.shape[:2]
-    x1 = max(0, x - pad_w)
-    y1 = max(0, y - pad_h)
-    x2 = min(img_w, x + w + pad_w)
-    y2 = min(img_h, y + h + pad_h)
-    
-    face_crop = pil_image.crop((x1, y1, x2, y2))
-    
-    # Draw bounding box on a copy
-    annotated = pil_image.copy()
-    annotated_cv = cv2.cvtColor(np.array(annotated), cv2.COLOR_RGB2BGR)
-    cv2.rectangle(annotated_cv, (x1, y1), (x2, y2), (0, 255, 128), max(2, int(img_w / 300)))
-    annotated = Image.fromarray(cv2.cvtColor(annotated_cv, cv2.COLOR_BGR2RGB))
-    
-    return face_crop, (x1, y1, x2, y2), annotated
+def pct(x, digits=0):
+    return f"{100 * x:.{digits}f}%"
 
-def compute_fft_spectrum(pil_img):
-    """Computes 2D Fourier Transform power spectrum heatmap."""
-    gray = np.array(pil_img.convert("L").resize((256, 256)))
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-    magnitude = 20 * np.log(np.abs(fshift) + 1e-8)
-    norm = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    colored = cv2.applyColorMap(norm, cv2.COLORMAP_VIRIDIS)
-    return Image.fromarray(cv2.cvtColor(colored, cv2.COLOR_BGR2RGB))
 
-def compute_ela(pil_img, quality=90):
-    """Computes Error Level Analysis (JPEG compression difference)."""
+@st.cache_data(show_spinner=False, max_entries=6)
+def run_analysis(data: bytes, model_file: str):
+    im = Image.open(io.BytesIO(data))
+    info = dict(format=im.format, mode=im.mode, size=im.size, bytes=len(data),
+                exif_fields=len(im.getexif()) if hasattr(im, "getexif") else 0, jpeg_q=detector.jpeg_quality(im))
+    t0 = time.time()
+    res = detector.analyze(im, model=model_file)
+    t1 = time.time()
+    exp = detector.explain(Image.open(io.BytesIO(data)), model=model_file,
+                           evidence_for="real" if res.real_prob >= 0.5 else "fake")
+    return res, exp, info, dict(analyze_s=t1 - t0, explain_s=time.time() - t1)
+
+
+def fft_view(pil):
+    import cv2
+    g = np.asarray(pil.convert("L").resize((256, 256)))
+    mag = 20 * np.log(np.abs(np.fft.fftshift(np.fft.fft2(g))) + 1e-8)
+    norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    return cv2.cvtColor(cv2.applyColorMap(norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
+
+
+def ela_view(pil, quality=90):
     buf = io.BytesIO()
-    pil_img.save(buf, "JPEG", quality=quality)
-    buf.seek(0)
-    compressed = Image.open(buf)
-    
-    ela = ImageChops.difference(pil_img.convert("RGB"), compressed.convert("RGB"))
-    extrema = ela.getextrema()
-    max_diff = max([ex[1] for ex in extrema])
-    scale = 255.0 / max(max_diff, 1)
-    return ImageEnhance.Brightness(ela).enhance(scale)
+    pil.save(buf, "JPEG", quality=quality)
+    diff = ImageChops.difference(pil.convert("RGB"), Image.open(io.BytesIO(buf.getvalue())).convert("RGB"))
+    top = max(e[1] for e in diff.getextrema())
+    return ImageEnhance.Brightness(diff).enhance(255.0 / max(top, 1))
 
-# ==========================================
-# SIDEBAR
-# ==========================================
 
+def gauge_html(p_fake, band):
+    left = f"{100 * p_fake:.1f}%"
+    shade = ""
+    if band:
+        lo_f, hi_f = 1 - band[1], 1 - band[0]          # band is on P(real); the gauge runs along P(AI)
+        shade = f'<div class="band" style="left:{100 * lo_f:.1f}%;width:{100 * (hi_f - lo_f):.1f}%"></div>'
+    return (f'<div class="gauge">{shade}<div class="mark" style="left:calc({left} - 2px)"></div></div>'
+            '<div class="gauge-lab"><span>0% - looks camera-made</span><span>looks AI-generated - 100%</span></div>')
+
+
+def tiles_figure(exp, res):
+    """Prepared image with the analysed 256 px regions outlined and their P(AI)."""
+    base = Image.fromarray(exp.base)
+    s = base.size[0] / res.prepared_size[0]
+    d = ImageDraw.Draw(base)
+    for (x0, y0, x1, y1), p in zip(res.boxes, res.tile_real):
+        col = (220, 38, 38) if p < 0.5 else (22, 163, 74)
+        d.rectangle([x0 * s, y0 * s, x1 * s - 1, y1 * s - 1], outline=col, width=max(2, round(base.size[0] / 300)))
+        d.text((x0 * s + 6, y0 * s + 4), f"AI {100 * (1 - p):.0f}%", fill=col)
+    return base
+
+
+# ----------------------------------------------------------------------------- sidebar
+models = list_models()
+active = detector.active_model_name()
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    
-    engine_choice = st.selectbox(
-        "Detection Engine",
-        [
-            "Dual-Engine Consensus (Highest Precision)",
-            "Universal XceptionNet (Fast & Robust)",
-            "Swin Vision Transformer (Modern AI Specialist)"
-        ],
-        index=0,
-        help="Select the AI architecture used to evaluate authenticity."
-    )
-    
+    st.header("Settings")
+    if not models:
+        st.error("No checkpoint found in models/.")
+        st.stop()
+    model_file = st.selectbox("Detector", models, index=models.index(active) if active in models else 0,
+                              help="general_* models analyse any kind of image. The others are the original "
+                                   "face-only models, kept for comparison and rollback.")
+    st.caption("Default is models/active_model.json. Same model & settings are used by `python predict.py`.")
     st.divider()
-    
-    st.subheader("Face Analysis")
-    enable_face_crop = st.checkbox(
-        "Auto-Crop Detected Face",
-        value=True,
-        help="Crops the primary face with padding. Recommended for portraits and face swaps."
-    )
-    
-    st.divider()
-    
-    threshold = st.slider(
-        "Classification Threshold",
-        min_value=0.30,
-        max_value=0.70,
-        value=0.50,
-        step=0.05,
-        help="Images with Real Probability below this threshold are flagged as Synthetic/Fake."
-    )
-    
-    st.divider()
-    st.markdown("""
-    **Dataset Scope:**
-    - Google Gemini (Imagen 3)
-    - Midjourney & Stable Diffusion
-    - RVF10K & StyleGAN Deepfakes
-    - Authentic Human Portraits
-    """)
+    st.markdown("**How to read the result**")
+    st.markdown("- *Prediction*: the verdict, from the calibrated score.\n"
+                "- *Visual evidence*: where the **model** looked.\n"
+                "- *Forensic observations*: generic checks the model does **not** use.\n"
+                "- *Reliability*: measured accuracy and known failures.")
 
-# ==========================================
-# MAIN INTERFACE
-# ==========================================
+card = model_card(model_file)
 
-st.markdown('<div class="main-header">🛡️ Universal Deepfake & AI Image Detector</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Detect deepfakes and AI-generated portraits from Google Gemini, Midjourney, Stable Diffusion, and GANs with multi-model forensic analysis.</div>', unsafe_allow_html=True)
+# ----------------------------------------------------------------------------- header + input
+st.markdown('<p class="hero-title">🔍 AI Image Detector</p>', unsafe_allow_html=True)
+st.markdown('<p class="hero-sub">Estimates whether an image was made by a camera or generated by AI, shows where the '
+            'model looked, and says how far to trust the answer. A research prototype - not forensic proof.</p>',
+            unsafe_allow_html=True)
 
-# Badges
-st.markdown("""
-<div>
-    <span class="badge-info">✨ Multi-Generator Support</span>
-    <span class="badge-info">🧠 Vision Transformer + XceptionNet</span>
-    <span class="badge-info">🔍 2D FFT & ELA Forensics</span>
-    <span class="badge-info">🎯 High-Precision Ensemble</span>
-</div>
-""", unsafe_allow_html=True)
+up = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"],
+                      help="Everything is processed locally; nothing is uploaded anywhere.")
+samples = sorted(glob.glob(os.path.join(SAMPLE_DIR, "*.*")))
+if samples:
+    with st.expander("Or try a bundled image (ground truth not shown on purpose)"):
+        cols = st.columns(min(4, len(samples)))
+        for i, p in enumerate(samples):
+            if cols[i % len(cols)].button(os.path.basename(p), key=f"sample_{i}", width="stretch"):
+                st.session_state["sample"] = p
 
-# Sample Quick Loader
-st.write("---")
-cols_quick = st.columns([1, 1, 1, 3])
-load_sample = None
+data, name = None, None
+if up is not None:
+    data, name = up.getvalue(), up.name
+    st.session_state.pop("sample", None)
+elif st.session_state.get("sample") and os.path.exists(st.session_state["sample"]):
+    with open(st.session_state["sample"], "rb") as f:
+        data, name = f.read(), os.path.basename(st.session_state["sample"])
 
-if cols_quick[0].button("📸 Sample Real"):
-    load_sample = r"test_images\face_real.jpg"
-if cols_quick[1].button("🤖 Sample Deepfake"):
-    load_sample = r"test_images\face_fake.jpg"
-if cols_quick[2].button("✨ Sample AI Face"):
-    ai_samples = [
-        r"data\ai_faces\AI-face-detection-Dataset\AI\0_20241130135552_A_close-up_shot_of_a_middle-aged_genderqueer_perso.jpg",
-        r"data\ai_faces\AI-face-detection-Dataset\AI\100_20241130141829_A_close-up_shot_of_a_middle-aged_male_person_of_Na.jpg"
-    ]
-    for s in ai_samples:
-        if os.path.exists(s):
-            load_sample = s
-            break
+if data is None:
+    st.info("Upload an image or pick a bundled one to start.")
+    st.stop()
 
-uploaded_file = st.file_uploader(
-    "Upload an image to inspect (JPEG, PNG, WEBP)",
-    type=["jpg", "jpeg", "png", "webp"]
-)
+try:
+    with st.spinner("Analysing - scoring regions and building the attention map..."):
+        res, exp, info, timing = run_analysis(data, model_file)
+except Exception as e:                                              # unreadable / unsupported file
+    st.error(f"Could not analyse this file: {e}")
+    st.stop()
 
-target_image = None
-if uploaded_file is not None:
-    target_image = Image.open(uploaded_file).convert("RGB")
-elif load_sample and os.path.exists(load_sample):
-    target_image = Image.open(load_sample).convert("RGB")
-    st.info(f"Loaded sample: `{os.path.basename(load_sample)}`")
+p_fake = res.fake_prob
+face_kind = res.kind == "face"
 
-# ==========================================
-# INFERENCE & RESULTS
-# ==========================================
+# ----------------------------------------------------------------------------- 1. prediction
+left, right = st.columns([5, 6], gap="large")
+with left:
+    st.image(detector.to_rgb(Image.open(io.BytesIO(data))), caption=f"{name} - {info['size'][0]}x{info['size'][1]} px",
+             width="stretch")
 
-if target_image is not None:
-    # 1. Preprocess Face Crop
-    face_crop, face_coords, annotated_img = detect_and_crop_face(target_image)
-    
-    # Choose which image to analyze
-    if enable_face_crop and face_coords is not None:
-        eval_image = face_crop
-        crop_status = "Detected face cropped with margin."
+with right:
+    if face_kind:
+        st.warning("This is the original **face-only** model. It was trained on face photographs and its answer is not "
+                   "meaningful for other kinds of images. Select a `general_*` detector in the sidebar for general use.")
+    verdict_cls = {"likely_fake": "fake", "likely_real": "real", "inconclusive": "unsure", "": "unsure"}[res.verdict]
+    verdict_txt = {"likely_fake": "Likely AI-generated", "likely_real": "Likely real", "inconclusive": "Inconclusive",
+                   "": ("Leans AI-generated" if p_fake >= 0.5 else "Leans real")}[res.verdict]
+    st.markdown('<div class="tag">Prediction</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="card"><span class="chip {verdict_cls}">{verdict_txt}</span>'
+                f'<div class="score">{pct(p_fake)} <small>calibrated probability that this image is AI-generated</small></div>'
+                f'{gauge_html(p_fake, res.band)}</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="tag" style="margin-top:1rem">Uncertainty</div>', unsafe_allow_html=True)
+    if res.band:
+        st.markdown(f"Scores between **{pct(1 - res.band[1])}** and **{pct(1 - res.band[0])}** AI-probability (dashed box) "
+                    "are reported as *inconclusive*; the model is not allowed to guess there.")
+    bins = (card or {}).get("reliability_bins") or []
+    hit = next((b for b in bins if b["lo"] <= p_fake <= b["hi"] and b["n"] >= 20), None)
+    if hit:
+        st.markdown(f"On the held-out benchmark, images that received a score in this range ({pct(hit['lo'])}-{pct(hit['hi'])}) "
+                    f"were actually AI-generated **{pct(hit['fake_rate'])}** of the time (n={hit['n']}).")
+    elif card is None:
+        st.markdown("No measured benchmark is attached to this model, so no reliability statement can be made.")
+    if res.tile_real and len(res.tile_real) > 1:
+        lo_t, hi_t = 1 - max(res.tile_real), 1 - min(res.tile_real)
+        st.markdown(f"{len(res.tile_real)} image regions were scored separately; their AI-probabilities range from "
+                    f"**{pct(lo_t)}** to **{pct(hi_t)}**. The headline is the average of their logits.")
+    for code, text in res.flags:
+        if code != "face_only_model":
+            st.warning(text)
+
+st.write("")
+tab_vis, tab_for, tab_rel, tab_tech = st.tabs(["Visual evidence", "Forensic observations", "How reliable is this?",
+                                               "Technical details"])
+
+# ----------------------------------------------------------------------------- 2. visual evidence
+with tab_vis:
+    view = st.radio("View", ["Model attention", "Original", "Regions analysed"], horizontal=True,
+                    label_visibility="collapsed")
+    if view == "Model attention":
+        st.image(exp.overlay, width="stretch",
+                 caption=f"Grad-CAM of the model's own output for '{exp.evidence_for}' (layer {exp.layer}). "
+                         "Warm colours = regions that pushed the model toward that answer. Dimmed = not examined.")
+    elif view == "Original":
+        st.image(exp.base, width="stretch")
+    elif res.boxes:
+        st.image(tiles_figure(exp, res), width="stretch",
+                 caption="The 256 px regions the network actually saw (full resolution, no resizing) and each one's score.")
     else:
-        eval_image = target_image
-        crop_status = "Full image analyzed (no face detected or crop disabled)."
+        st.info("This model looks at the whole image at once, so there are no separate regions.")
+    st.markdown("**What this map is - and is not.** It shows which parts of the image influenced *this model's* score. It "
+                "is **not** proof that those pixels were edited or generated, and it can highlight perfectly ordinary areas.")
+    ex = (card or {}).get("explain")
+    if ex:
+        st.markdown(f"*Measured connection to the decision:* on {ex['n']} validation images, removing the highlighted "
+                    f"regions lowered the model's own score more than removing random regions in "
+                    f"**{pct(ex['beats_random_frac'])}** of cases (chance level is about 25%). This verifies the map "
+                    "tracks the model, not that it tracks manipulation.")
+    if res.tile_real and len(res.tile_real) > 1:
+        with st.expander("Per-region scores"):
+            rows = [dict(region=i + 1, x=b[0], y=b[1], ai_probability=round(100 * (1 - p), 1))
+                    for i, (b, p) in enumerate(zip(res.boxes, res.tile_real))]
+            st.dataframe(rows, width="stretch", hide_index=True)
 
-    # Layout: Image Display
-    col_left, col_right = st.columns([1, 1])
-    with col_left:
-        st.subheader("Uploaded Image")
-        st.image(annotated_img, use_container_width=True)
-        st.caption(f"Status: {crop_status}")
-        
-    with col_right:
-        st.subheader("Analyzed Region")
-        st.image(eval_image, use_container_width=True)
-        st.caption(f"Dimensions: {eval_image.size[0]} x {eval_image.size[1]} px")
+# ----------------------------------------------------------------------------- 3. forensic observations
+with tab_for:
+    st.markdown("These are **independent, generic checks of the file**. The detector does **not** use them, none has a "
+                "validated threshold, and ordinary resizing or re-compression can produce the same patterns - so they "
+                "cannot confirm or refute the prediction.")
+    f1, f2 = st.columns(2)
+    f1.metric("File format", info["format"] or "unknown")
+    f2.metric("Size", f"{info['size'][0]}x{info['size'][1]} px / {info['bytes'] / 1024:.0f} KB")
+    f3, f4 = st.columns(2)
+    f3.metric("Estimated JPEG quality", "n/a (not a JPEG)" if info["jpeg_q"] is None else f"~{info['jpeg_q']:.0f}")
+    f4.metric("EXIF fields", str(info["exif_fields"]))
+    st.caption("Missing EXIF is common for both real photos (stripped by messengers, social media) and AI images, "
+               "so its absence says nothing; present camera EXIF can be edited. Neither is used by the detector.")
+    pil_full = detector.to_rgb(Image.open(io.BytesIO(data)))
+    with st.expander("Error Level Analysis (generic diagnostic)"):
+        st.image(ela_view(pil_full), width="stretch",
+                 caption="Difference after re-saving at JPEG quality 90, contrast-stretched. Reflects the compression history "
+                         "and image content (edges, texture). It is not evidence of AI generation.")
+    with st.expander("Frequency spectrum (generic diagnostic)"):
+        st.image(fft_view(pil_full), width=320,
+                 caption="Log power spectrum of the grayscale image resized to 256 px. Resizing and compression change it; "
+                         "no decision rule is attached to it here.")
 
-    # Run Prediction
-    with st.spinner("Analyzing neural texture and frequency signatures..."):
-        p_xc_fake, p_xc_real = None, None
-        p_swin_fake, p_swin_real = None, None
-        
-        # Universal Xception
-        if "Xception" in engine_choice or "Consensus" in engine_choice:
-            xc_model = load_universal_xception()
-            if xc_model:
-                img_xc = eval_image.resize(IMG_SIZE)
-                arr = np.expand_dims(np.array(img_xc, dtype=np.float32), 0)
-                arr = tf.keras.applications.xception.preprocess_input(arr)
-                p_xc_real = float(xc_model.predict(arr, verbose=0)[0][0])
-                p_xc_fake = 1.0 - p_xc_real
-        
-        # Swin Transformer
-        if "Swin" in engine_choice or "Consensus" in engine_choice:
-            swin_pipe = load_swin_transformer()
-            if swin_pipe:
-                res = swin_pipe(eval_image)
-                p_swin_fake = next(item["score"] for item in res if item["label"] == "artificial")
-                p_swin_real = next(item["score"] for item in res if item["label"] == "human")
-        
-        # Calculate Final Probabilities based on selected engine
-        if "Consensus" in engine_choice and p_swin_fake is not None and p_xc_fake is not None:
-            # Weighted ensemble: 55% Swin (diffusion / modern AI specialist) + 45% Universal Xception
-            final_fake_prob = 0.55 * p_swin_fake + 0.45 * p_xc_fake
-            final_real_prob = 1.0 - final_fake_prob
-            engine_label = "Dual-Engine Consensus (Swin ViT + Universal Xception)"
-        elif "Swin" in engine_choice and p_swin_fake is not None:
-            final_fake_prob = p_swin_fake
-            final_real_prob = p_swin_real
-            engine_label = "Swin Vision Transformer"
-        else:
-            final_fake_prob = p_xc_fake if p_xc_fake is not None else 0.5
-            final_real_prob = p_xc_real if p_xc_real is not None else 0.5
-            engine_label = "Universal XceptionNet"
-
-    # Verdict
-    is_real = final_real_prob >= threshold
-    verdict = "REAL (AUTHENTIC)" if is_real else "FAKE (AI / DEEPFAKE)"
-    
-    st.write("---")
-    st.subheader("Prediction Result")
-    
-    if is_real:
-        st.success(f"### 🟢 {verdict}")
-        st.markdown(f"**Confidence:** This image exhibits genuine photographic textures, natural sensor noise, and authentic facial structures ({final_real_prob*100:.1f}% confidence).")
+# ----------------------------------------------------------------------------- 4. reliability
+with tab_rel:
+    if card is None:
+        st.warning("No measured model card is available for this model (artifacts/model_card_*.json). "
+                   "Treat its output as unvalidated.")
     else:
-        st.error(f"### 🔴 {verdict}")
-        st.markdown(f"**Confidence:** Synthetic generation signatures or deepfake manipulation patterns detected ({final_fake_prob*100:.1f}% synthetic probability).")
+        b = card["benchmark"]
+        st.markdown(f"**Independent benchmark:** {b['name']} - {b['n_fake']} AI images from generator families the model "
+                    f"never saw in training + {b['n_real']} real images. {card.get('benchmark_note', '')}")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("ROC-AUC", f"{b['auc']:.2f}", help=f"95% CI {b['auc_ci'][0]:.2f}-{b['auc_ci'][1]:.2f}")
+        m2.metric("AI images caught", pct(b["fake_recall"]))
+        m3.metric("Real images kept real", pct(b["real_specificity"]))
+        m4.metric("Calibration error (ECE)", f"{b['ece']:.2f}")
+        st.caption(f"95% CI for AUC: {b['auc_ci'][0]:.2f}-{b['auc_ci'][1]:.2f}. Percentages use the default decision "
+                   "(P(AI) = 50%).")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Detection rate by AI-generator family**")
+            st.dataframe([{"family": k, "images": v["n"], "caught": pct(v["recall"])}
+                          for k, v in sorted(card["per_family"].items(), key=lambda kv: kv[1]["recall"])],
+                         hide_index=True, width="stretch")
+        with c2:
+            st.markdown("**Real images kept real, by source**")
+            st.dataframe([{"source": k, "images": v["n"], "kept real": pct(v["specificity"])}
+                          for k, v in sorted(card["per_real_source"].items(), key=lambda kv: kv[1]["specificity"])],
+                         hide_index=True, width="stretch")
+        st.markdown("**Robustness (same images, degraded)**")
+        st.dataframe([{"condition": k, "ROC-AUC": round(v["auc"], 3), "balanced accuracy": pct(v["balanced_acc"])}
+                      for k, v in card["robustness"].items()], hide_index=True, width="stretch")
+        weak = [k for k, v in card["per_family"].items() if v["recall"] < 0.5]
+        if weak:
+            st.error("Documented weak spots (detection rate below 50%): " + ", ".join(sorted(weak)) + ".")
+        st.markdown("**Known limits**")
+        for line in card.get("limitations", []):
+            st.markdown(f"- {line}")
 
-    # Metrics
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Authentic Probability", f"{final_real_prob * 100:.2f}%")
-    m2.metric("Synthetic / Fake Probability", f"{final_fake_prob * 100:.2f}%")
-    m3.metric("Active Engine", engine_label.split(" (")[0])
+# ----------------------------------------------------------------------------- 5. technical
+with tab_tech:
+    st.markdown(f"- **Model**: `{res.model_id}` ({res.kind})")
+    st.markdown(f"- **Temperature (calibration)**: {res.temperature:.3f} - fitted on a held-out calibration split, "
+                "not on the benchmark")
+    if res.band:
+        st.markdown(f"- **Decision band (P(real))**: inconclusive between {res.band[0]:.2f} and {res.band[1]:.2f}")
+    if res.tile_real:
+        st.markdown(f"- **Regions scored**: {len(res.tile_real)} of 256x256 px on a {res.prepared_size[0]}x{res.prepared_size[1]} "
+                    "px working image (flip-averaged)")
+    st.markdown(f"- **Run time**: analysis {timing['analyze_s']:.2f}s, attention map {timing['explain_s']:.2f}s")
+    st.markdown(f"- **File SHA-256**: `{hashlib.sha256(data).hexdigest()[:16]}...`")
+    st.caption("The command-line tool `python predict.py <image>` runs the same code path and gives the same numbers.")
 
-    # Probability Bars
-    st.write("**Real Probability:**")
-    st.progress(float(min(max(final_real_prob, 0.0), 1.0)))
-    
-    st.write("**Fake / AI Probability:**")
-    st.progress(float(min(max(final_fake_prob, 0.0), 1.0)))
-
-    # ======================================
-    # FORENSIC EXPLAINABILITY TABS
-    # ======================================
-    st.write("---")
-    st.subheader("🔬 Forensic Analysis Suite")
-    
-    tab_ensemble, tab_fft, tab_ela, tab_guide = st.tabs([
-        "📊 Model Breakdown",
-        "🌐 Frequency Spectrum (FFT)",
-        "🔍 Error Level Analysis (ELA)",
-        "📖 Artifact Guide"
-    ])
-    
-    with tab_ensemble:
-        st.markdown("#### Individual Engine Assessment")
-        e_col1, e_col2 = st.columns(2)
-        
-        with e_col1:
-            st.markdown("**Universal XceptionNet (Deepfake & AI Faces)**")
-            if p_xc_real is not None:
-                st.write(f"- Real: `{p_xc_real*100:.1f}%` | Fake: `{p_xc_fake*100:.1f}%`")
-                st.write(f"- Verdict: {'🟢 Real' if p_xc_real >= threshold else '🔴 Fake'}")
-            else:
-                st.write("*Not invoked for this selection.*")
-                
-        with e_col2:
-            st.markdown("**Swin Vision Transformer (Modern Generative AI)**")
-            if p_swin_real is not None:
-                st.write(f"- Real: `{p_swin_real*100:.1f}%` | Fake: `{p_swin_fake*100:.1f}%`")
-                st.write(f"- Verdict: {'🟢 Real' if p_swin_real >= threshold else '🔴 Fake'}")
-            else:
-                st.write("*Not invoked for this selection.*")
-
-    with tab_fft:
-        st.markdown("#### 2D Fourier Frequency Spectrum")
-        st.markdown("""
-        Natural camera sensors produce a smooth radial roll-off in the high-frequency Fourier spectrum.
-        Generative models (Gemini / Imagen, Stable Diffusion, GANs) leave distinctive **high-frequency spectral spikes, checkerboards, or unnatural circular decay**.
-        """)
-        fft_view = compute_fft_spectrum(eval_image)
-        st.image(fft_view, caption="2D Power Spectrum (Log Magnitude with Viridis Map)", width=350)
-
-    with tab_ela:
-        st.markdown("#### Error Level Analysis (ELA)")
-        st.markdown("""
-        ELA highlights compression rate variances across the image.
-        In authentic camera JPEGs, error levels are uniformly distributed. In AI-generated faces or spliced deepfakes, manipulated regions often exhibit distinct brightness discrepancies.
-        """)
-        ela_view = compute_ela(eval_image)
-        st.image(ela_view, caption="ELA Heatmap (Enhanced Difference at 90% Quality)", use_container_width=True)
-
-    with tab_guide:
-        st.markdown("""
-        ### Why Modern AI (Gemini, Midjourney, SD) Needs Retrained Models
-        1. **Latent Diffusion vs Classic GANs**:
-           - Classic deepfake datasets (RVF10K, FFHQ) only tested **StyleGAN 2020** faces.
-           - Google Gemini (Imagen 3), Midjourney, and Stable Diffusion are **diffusion models**.
-           - Without modern AI training data, older models fail because they search exclusively for StyleGAN checkerboard patterns.
-        2. **Multi-Scale Self-Attention**:
-           - Swin Transformer and Vision Transformers evaluate patch-level dependencies across the entire face, catching subtle skin pore blurring and unnatural light falloff.
-        3. **Universal Dataset Coverage**:
-           - The retrained model merges prompt-generated modern AI faces with classic deepfakes and verified authentic photography.
-        """)
-
-# ==========================================
-# FOOTER
-# ==========================================
 st.divider()
-st.caption("Universal AI & Deepfake Detection Engine | CDAC Project")
+st.caption("Research prototype. Results are probabilistic, can be wrong, and must not be used as sole evidence about "
+           "anyone's image. Training and benchmark data are licensed for non-commercial research (see README).")

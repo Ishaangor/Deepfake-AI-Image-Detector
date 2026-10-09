@@ -1,104 +1,106 @@
+"""CLI prediction. All preprocessing/crop/calibration logic lives in detector.analyze() (shared with app.py).
+
+    python predict.py image.jpg [--crop auto|face|none] [--model file.pt] [--json]
+
+Rollback to the original Keras Xception path: set DETECTOR_BACKEND=legacy (needs TensorFlow).
+"""
+import argparse
+import json
 import os
 import sys
-import cv2
-import numpy as np
-from PIL import Image
-import tensorflow as tf
 
-# Reduce TensorFlow messages
+import detector
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+LEGACY_MODEL_PATH = os.path.join("models", "best_xception.keras")
 
-# ==========================================
-# SETTINGS
-# ==========================================
 
-MODEL_PATH = r"models\best_xception.keras"
-IMG_SIZE = (299, 299)
+def legacy_predict(path):
+    """Original Keras Xception path, kept only for rollback."""
+    import cv2
+    import numpy as np
+    import tensorflow as tf
+    from PIL import Image
+    model = tf.keras.models.load_model(LEGACY_MODEL_PATH)
+    img = detector.load_rgb(path)
+    box = detector.find_face(img)
+    region = img.crop(box) if box else img
+    arr = np.expand_dims(np.array(region.resize((299, 299)), dtype=np.float32), 0)
+    arr = tf.keras.applications.xception.preprocess_input(arr)
+    real = float(model.predict(arr, verbose=0)[0][0])
+    return dict(real_prob=real, fake_prob=1 - real, model_id="legacy:xception:best_xception.keras",
+                crop_policy="face", face_found=box is not None, region_size=region.size, temperature=1.0)
 
-# ==========================================
-# CHECK ARGUMENTS
-# ==========================================
 
-if len(sys.argv) < 2:
-    print("\nERROR: No image path provided.")
-    print("\nUsage:")
-    print(r'  python predict.py "path\to\image.jpg"')
-    sys.exit(1)
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Deepfake / AI image detector")
+    ap.add_argument("image")
+    ap.add_argument("--crop", choices=["auto", "face", "none"], default="auto",
+                    help="auto = the active model's validated policy (default)")
+    ap.add_argument("--model", default=None, help="checkpoint file name in models/ (default: active model)")
+    ap.add_argument("--json", action="store_true", help="print one machine-readable JSON line")
+    args = ap.parse_args(argv)
 
-IMAGE_PATH = sys.argv[1]
+    if not os.path.isfile(args.image):
+        print(f"ERROR: image not found: {args.image}", file=sys.stderr)
+        return 1
+    notes = []
+    if detector.available(args.model):
+        r = detector.analyze(args.image, crop=args.crop, model=args.model)
+        out = dict(real_prob=r.real_prob, fake_prob=r.fake_prob, model_id=r.model_id, crop_policy=r.crop_policy,
+                   face_found=r.face_found, region_size=list(r.region.size), temperature=r.temperature,
+                   kind=r.kind, verdict=r.verdict or None, band=list(r.band) if r.band else None,
+                   tile_ai_prob=[round(1 - p, 4) for p in r.tile_real] if r.tile_real else None,
+                   flags=[code for code, _ in r.flags], image_size=list(r.image_size))
+        notes = [text for _, text in r.flags]
+    elif os.path.isfile(LEGACY_MODEL_PATH):
+        out = legacy_predict(args.image)
+        out["region_size"] = list(out["region_size"])
+    else:
+        print("ERROR: no model found (models/best_finetuned.pt or models/best_xception.keras)", file=sys.stderr)
+        return 1
 
-if not os.path.isfile(IMAGE_PATH):
-    print("\nERROR: Image not found.")
-    print("Path:", IMAGE_PATH)
-    sys.exit(1)
+    out["prediction"] = "REAL" if out["real_prob"] >= 0.5 else "FAKE"
+    if args.json:
+        print(json.dumps(out))
+        return 0
+    if sys.platform.startswith("win"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    general = out.get("kind") == "general"
+    crop = out["crop_policy"] + ("" if out["face_found"] is None else
+                                 (" (face found)" if out["face_found"] else " (no face found -> full image)"))
+    print("\n" + "=" * 62)
+    print("       AI IMAGE DETECTOR")
+    print("=" * 62)
+    print(f"Image            : {args.image}")
+    print(f"Model            : {out['model_id']}")
+    if general:
+        tiles = out["tile_ai_prob"]
+        print(f"Image size       : {out['image_size'][0]}x{out['image_size'][1]} px; {len(tiles)} region(s) of 256x256 scored")
+        print(f"AI probability   : {out['fake_prob'] * 100:.1f}%   (calibrated; real = {out['real_prob'] * 100:.1f}%)")
+        if len(tiles) > 1:
+            print(f"Region spread    : {min(tiles) * 100:.0f}% - {max(tiles) * 100:.0f}% AI-probability")
+        label = {"likely_fake": "LIKELY AI-GENERATED", "likely_real": "LIKELY REAL",
+                 "inconclusive": "INCONCLUSIVE"}.get(out["verdict"], out["prediction"])
+        print(f"Verdict          : {label}")
+        if out["band"]:
+            print(f"Inconclusive band: P(real) between {out['band'][0]:.2f} and {out['band'][1]:.2f}")
+    else:
+        print(f"Crop policy      : {crop}")
+        print(f"Region analyzed  : {out['region_size'][0]}x{out['region_size'][1]} px")
+        print(f"Real probability : {out['real_prob'] * 100:.2f}%")
+        print(f"Fake probability : {out['fake_prob'] * 100:.2f}%")
+        print(f"Prediction       : {'[+] REAL (Authentic)' if out['prediction'] == 'REAL' else '[-] FAKE (AI Generated / Deepfake)'}")
+    for n in notes:
+        print(f"WARNING          : {n}")
+    print("Note             : a calibrated score is an estimate, not proof; see the model card / README for measured")
+    print("                   accuracy, per-generator failures and known limits.")
+    print("=" * 62 + "\n")
+    return 0
 
-if not os.path.isfile(MODEL_PATH):
-    print("\nERROR: Model not found.")
-    print("Expected model:", MODEL_PATH)
-    sys.exit(1)
 
-# ==========================================
-# LOAD MODEL & PREDICT
-# ==========================================
-
-print("\nLoading Universal AI & Deepfake Detector...")
-model = tf.keras.models.load_model(MODEL_PATH)
-print("Model loaded successfully.")
-
-# Load Image
-pil_img = Image.open(IMAGE_PATH).convert("RGB")
-img_cv = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-
-# Face Detection
-cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-
-if len(faces) > 0:
-    faces_sorted = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-    x, y, w, h = faces_sorted[0]
-    pad_w = int(w * 0.15)
-    pad_h = int(h * 0.15)
-    img_h, img_w = img_cv.shape[:2]
-    x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
-    x2, y2 = min(img_w, x + w + pad_w), min(img_h, y + h + pad_h)
-    eval_img = pil_img.crop((x1, y1, x2, y2))
-    region_info = f"Detected Face cropped ({x2-x1}x{y2-y1} px)"
-else:
-    eval_img = pil_img
-    region_info = f"Full Image ({pil_img.size[0]}x{pil_img.size[1]} px)"
-
-print(f"Region analyzed: {region_info}")
-
-# Preprocess for Xception
-img_resized = eval_img.resize(IMG_SIZE)
-image_array = np.expand_dims(np.array(img_resized, dtype=np.float32), axis=0)
-image_array = tf.keras.applications.xception.preprocess_input(image_array)
-
-# Prediction
-prediction = model.predict(image_array, verbose=0)
-real_probability = float(prediction[0][0])
-fake_probability = 1.0 - real_probability
-
-result = "REAL" if real_probability >= 0.5 else "FAKE"
-
-# Reconfigure stdout for UTF-8 on Windows
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
-# ==========================================
-# DISPLAY RESULT
-# ==========================================
-
-print("\n" + "=" * 50)
-print("       UNIVERSAL AI & DEEPFAKE PREDICTION")
-print("=" * 50)
-print(f"Image            : {IMAGE_PATH}")
-print(f"Region           : {region_info}")
-print(f"Real probability : {real_probability * 100:.2f}%")
-print(f"Fake probability : {fake_probability * 100:.2f}%")
-print(f"Prediction       : {'[+] REAL (Authentic)' if result == 'REAL' else '[-] FAKE (AI Generated / Deepfake)'}")
-print("=" * 50 + "\n")
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,24 @@
+{
+ "temperature": 0.9850169080373167,
+ "temperature_calib_mix": 0.9850169080373167,
+ "temperature_calib_clean_only": 0.8884503405498715,
+ "temperature_source": "fit on calib split (n=904) over ['clean', 'jpeg50', 'down128', 'down96', 'blur1.0', 'gray', 'color']",
+ "crop_policy": "none",
+ "crop_selection": {
+  "split": "val_sel",
+  "n": 903,
+  "acc_none": 0.9833887043189369,
+  "acc_face": 0.9878183831672204,
+  "face_found_frac": 0.9147286821705426,
+  "rule": "face only if acc_face > acc_none + 0.005"
+ },
+ "arch": "efficientnet_b0",
+ "img": 256,
+ "checkpoint": "candidate_A_mild.pt",
+ "checkpoint_info": {
+  "epoch": 6,
+  "val_sel_composite": 0.9959446517902864,
+  "variant": "A_mild",
+  "init": "best_finetuned.pt"
+ }
+}

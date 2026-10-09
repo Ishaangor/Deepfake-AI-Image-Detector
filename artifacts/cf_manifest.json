@@ -1,0 +1,42 @@
+{
+ "repo": "OwensLab/CommunityForensics-Small",
+ "seed": 20261009,
+ "shards": {
+  "fake": [
+   "data/HFCF_small_10.parquet",
+   "data/HFCF_small_17.parquet",
+   "data/HFCF_small_24.parquet",
+   "data/HFCF_small_25.parquet",
+   "data/HFCF_small_42.parquet",
+   "data/HFCF_small_59.parquet",
+   "data/HFCF_small_68.parquet",
+   "data/HFCF_small_83.parquet",
+   "data/HFCF_small_85.parquet"
+  ],
+  "coco": [
+   "data/HFCF_small_123.parquet",
+   "data/HFCF_small_131.parquet",
+   "data/HFCF_small_146.parquet"
+  ],
+  "lhq": [
+   "data/HFCF_small_170.parquet",
+   "data/HFCF_small_185.parquet"
+  ],
+  "ffhq": [
+   "data/HFCF_small_101.parquet"
+  ],
+  "vision": [
+   "data/HFCF_small_115.parquet",
+   "data/HFCF_small_116.parquet"
+  ],
+  "manual_extra": [
+   "data/HFCF_small_74.parquet",
+   "data/HFCF_small_76.parquet",
+   "data/HFCF_small_66.parquet",
+   "data/HFCF_small_79.parquet",
+   "data/HFCF_small_67.parquet",
+   "data/HFCF_small_70.parquet",
+   "data/HFCF_small_87.parquet"
+  ]
+ }
+}

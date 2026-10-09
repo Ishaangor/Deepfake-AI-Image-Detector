@@ -1,0 +1,11 @@
+{
+ "n": 45110,
+ "fake": 27973,
+ "real": 17137,
+ "eval_models": 21,
+ "fake_rows_excluded_as_eval_generators": 0,
+ "real_jpeg_native": 0.6503472019606699,
+ "target_jpeg_share": 0.9125868004901675,
+ "p_fake_recompress": 0.9109959076224459,
+ "p_png_real_recompress": 0.75
+}

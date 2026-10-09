@@ -1,0 +1,53 @@
+{
+ "name": "general_native_b",
+ "layers": {
+  "bn2": {
+   "correct": {
+    "n": 80,
+    "del_gain": 1.110708177779937,
+    "ins_gain": 0.8890917916782201,
+    "beats_random_frac": 0.575,
+    "rho_mean": 0.004460325398900055
+   },
+   "wrong": {
+    "n": 80,
+    "del_gain": 0.649682077768375,
+    "ins_gain": 1.1373934104813088,
+    "beats_random_frac": 0.5375,
+    "rho_mean": 0.011946607575437047
+   }
+  },
+  "blocks.4": {
+   "correct": {
+    "n": 80,
+    "del_gain": 1.043182469655585,
+    "ins_gain": 0.9781773397116922,
+    "beats_random_frac": 0.7625,
+    "rho_mean": 0.009980328725717047
+   },
+   "wrong": {
+    "n": 80,
+    "del_gain": 0.8726846531229967,
+    "ins_gain": 0.9567799067786836,
+    "beats_random_frac": 0.6875,
+    "rho_mean": 0.011820911559412875
+   }
+  },
+  "blocks.2": {
+   "correct": {
+    "n": 80,
+    "del_gain": 0.6371280036279738,
+    "ins_gain": 0.44804841730510814,
+    "beats_random_frac": 0.4625,
+    "rho_mean": -0.02843970973467817
+   },
+   "wrong": {
+    "n": 80,
+    "del_gain": 0.614278646340487,
+    "ins_gain": 0.612828136371536,
+    "beats_random_frac": 0.6,
+    "rho_mean": 0.02347129826206274
+   }
+  }
+ }
+}

@@ -32,3 +32,28 @@ Thumbs.db
 # Temporary files and logs
 *.log
 .cache/
+
+train.log
+smoke.log
+
+# experiment outputs
+artifacts/hash_cache.json
+robust_*.log
+eval_report.txt
+data/commfor/
+artifacts/cf_*.parquet
+artifacts/*.npy
+cf_scan_*.log
+
+# data caches / downloads (re-creatable, large, third-party licensed)
+data/openimages/
+data/commfor/
+artifacts/*.parquet
+artifacts/evalraw_*
+*.err
+backups/
+graphify-out/
+
+# development stand-in checkpoints (superseded; not shipped)
+models/general_native_a.*
+models/general_glob_a.pt
